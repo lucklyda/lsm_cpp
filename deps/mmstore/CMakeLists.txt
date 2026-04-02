@@ -1,0 +1,2 @@
+add_executable(skipmap_test skipmap_test.cpp)
+target_link_libraries(skipmap_test)
