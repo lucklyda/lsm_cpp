@@ -97,8 +97,10 @@ public:
 class FileObject
 {
 public:
-    int fd = -1;        // ✅ 强制初始化为 -1
+    int fd = -1;    
     uint64_t size = 0;
+    std::string path_; // for inner delete file
+    mutable std::mutex lock;
 
 public:
     FileObject() = default;
@@ -123,13 +125,13 @@ public:
     static FileObject* create(const char* path) {
         int fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0644);
         if (fd == -1) return nullptr;
-        return new FileObject(fd);
+        return new FileObject(fd,path);
     }
 
     static FileObject* open_inner(const char* path) {
         int fd = open(path, O_RDWR);
         if (fd == -1) return nullptr;
-        return new FileObject(fd);
+        return new FileObject(fd,path);
     }
 
     static bool check_file(const char* path) {
@@ -154,7 +156,7 @@ public:
         return false;
     }
 
-    explicit FileObject(int fd_) : fd(fd_) {
+    explicit FileObject(int fd_,const char*path) : fd(fd_),path_(path) {
         struct stat st{};
         if (fstat(fd_, &st) == 0) {
             size = static_cast<uint64_t>(st.st_size);
@@ -163,20 +165,30 @@ public:
         }
     }
 
-    ~FileObject() {
+    void inner_close(){
         if (fd != -1) {
             close(fd);
-            fd = -1;  // ✅ 关键！防止重复关闭
+            fd = -1; 
         }
     }
 
+    ~FileObject() {
+        if (fd != -1) {
+            close(fd);
+            fd = -1; 
+        }
+    }
+
+    //涉及到多个线程的读写
     ssize_t read(char* data, uint64_t len, uint64_t offset) {
+        std::scoped_lock<std::mutex> gurad{lock};
         if (fd == -1 || !data) return -1;
         lseek(fd, static_cast<off_t>(offset), SEEK_SET);
         return ::read(fd, data, static_cast<size_t>(len));
     }
 
     ssize_t write(const char* data, uint64_t len) {
+        std::scoped_lock<std::mutex> gurad{lock};
         if (fd == -1 || !data) return -1;
         lseek(fd, 0, SEEK_END);
         ssize_t r = ::write(fd, data, static_cast<size_t>(len));
@@ -187,6 +199,7 @@ public:
 
 class Sstable
 {
+    friend class TableBuilder;
 private:
     std::shared_ptr<FileObject> file;
     std::vector<BlockMeta> metas;
@@ -205,6 +218,16 @@ public:
         id(id_),first_key(first_key_),last_key(last_key_),bloom(std::move(bloom_)),max_ts_(max_ts)
     {
     }
+
+    ~Sstable() = default;
+    // {
+    //     if(file && file->fd!=-1){
+    //         std::string path = file->path_;
+    //         file->inner_close()
+    //         FileObject::delete_file(path.c_str());
+
+    //     }
+    // }
 
     static Sstable* open(uint64_t id,std::unique_ptr<FileObject> file_){
         // auto len = file_->size;
@@ -301,7 +324,7 @@ public:
         return new Sstable(std::move(file_),std::move(metas),
                 meta_offset,id,first_key,last_key,std::move(bloom),max_ts);
     }
-    ~Sstable() = default;
+    
 
     std::unique_ptr<Block> read_block(uint16_t idx){
         if(idx>=metas.size()){
@@ -499,7 +522,7 @@ public:
     void check_upper()
     {
         if(upper_bound.user_key.length()>0){
-            is_bigt_upper = blk_iter && blk_iter->is_valid() && upper_bound<blk_iter->key();
+            is_bigt_upper = blk_iter && blk_iter->is_valid() && !(upper_bound<blk_iter->key());
         }else{
             is_bigt_upper=false;
         }

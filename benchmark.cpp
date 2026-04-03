@@ -68,6 +68,8 @@ LsmStorageOptions default_options() {
     options.enable_wal = true;            // 开启WAL
     options.serializable = true;          // 可串行化事务
     auto temp = LeveledCompactionOptions();
+    auto temp1 = NoCompactionOptions();
+    
     temp.base_level_size_mb = 4;
     temp.level0_file_num_compaction_trigger=3;
     temp.level_size_multiplier = 2;
@@ -139,10 +141,16 @@ void bench_single_read_random() {
     // 随机读取
     auto start = now();
     size_t hit = 0;
+    size_t null_val=0;
     for (const auto& key : keys) {
         auto val = lsm.get(key.first);
-        if (!val.is_empty() && key.second==val.value) hit++;
+        if(val.is_empty()){
+            null_val++;
+        }else if(key.second==val.value){
+            hit++;
+        }
     }
+    std::cout<<"Null Value "<<null_val<<std::endl;
     auto end = now();
 
     print_result("单线程随机读取(命中率100%)", TEST_KEY_COUNT, elapsed_ms(start, end));
@@ -293,10 +301,10 @@ void bench_scan() {
     auto start = now();
     // 全量扫描
     Bound<std::string_view> lower;
-    lower.type = 0;
+    lower.type = 1;
     lower.key = "scan_key_0";
     Bound<std::string_view> upper;
-    upper.type = 0;
+    upper.type = 1;
     upper.key = "scan_key_" + std::to_string(TEST_KEY_COUNT);
     auto iter = lsm.scan(lower, upper);
 

@@ -397,6 +397,18 @@ std::vector<std::shared_ptr<Sstable>> LsmStorageInner::compact(CompactionTask &t
                 SstConcatIterator::create_and_seek_to_first(upper_tables),
                 SstConcatIterator::create_and_seek_to_first(lower_tables)
             ));
+            // std::vector<std::unique_ptr<Iterators>> iters;
+            // for(auto &id:o->upper_level_sst_ids){
+            //     iters.push_back(std::unique_ptr<Iterators>(
+            //         SsTableIterator::create_and_seek_to_first(snapshot->sstables.at(id).get())
+            //     ));
+            // }
+            // for(auto &id:o->lower_level_sst_ids){
+            //     iters.push_back(std::unique_ptr<Iterators>(
+            //         SsTableIterator::create_and_seek_to_first(snapshot->sstables.at(id).get())
+            //     ));
+            // }
+            // return compact_generate_sst_from_iter(std::make_unique<MergeIterators>(std::move(iters)));
         }else{
             std::vector<std::unique_ptr<Iterators>> upper_iters;
             for(auto &id:o->upper_level_sst_ids){
@@ -404,10 +416,17 @@ std::vector<std::shared_ptr<Sstable>> LsmStorageInner::compact(CompactionTask &t
                     snapshot->sstables.at(id).get()
                 )));
             }
+
             std::vector<std::shared_ptr<Sstable>> lower_tables;
             for(auto &id:o->lower_level_sst_ids){
                 lower_tables.push_back(snapshot->sstables.at(id));
             }
+            // std::vector<std::unique_ptr<Iterators>> iters;
+            // for(auto &id:o->lower_level_sst_ids){
+            //     iters.push_back(std::unique_ptr<Iterators>(
+            //         SsTableIterator::create_and_seek_to_first(snapshot->sstables.at(id).get())
+            //     ));
+            // }
             return compact_generate_sst_from_iter(std::make_unique<TwoMergeIterator>(
                 std::make_unique<MergeIterators>(std::move(upper_iters)),
                 SstConcatIterator::create_and_seek_to_first(lower_tables)
@@ -625,6 +644,9 @@ Value LsmStorageInner::get_with_ts(std::string_view key,uint64_t ts)
             auto table = snapshot->sstables.at(id);
             if(keep_table(key,table.get())){
                 tables.push_back(table);
+                // ln_iters.push_back(std::unique_ptr<Iterators>(
+                //     SsTableIterator::create_and_seek_to_key(table.get(),LsmKey(key,TS_BEGIN))
+                // ));
             }
         }
         ln_iters.push_back(std::unique_ptr<Iterators>(SstConcatIterator::create_and_seek_to_key(
@@ -700,7 +722,6 @@ bool LsmStorageInner::force_freeze_memtable()
 
 bool LsmStorageInner::force_flush_next_imm_memtable()
 {
-    //TOOD:这里必须加锁吗 
     std::unique_lock write_lock(write_mutex_);
     uint64_t flush_id = 0;
     auto block_size = options.block_size;

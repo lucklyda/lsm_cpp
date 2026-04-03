@@ -10,7 +10,6 @@ struct HeapWrapper {
     HeapWrapper(int idx, std::unique_ptr<Iterators> it)
         : index(idx), iter(std::move(it)) {}
 
-    // 重载比较：用于 priority_queue 最小堆
     bool operator>(const HeapWrapper& other) const {
         int cmp = iter->key().cmp(other.iter->key());
         if (cmp != 0) {

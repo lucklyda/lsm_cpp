@@ -50,6 +50,18 @@ public:
     virtual ~CompactionOptions() = default;
 };
 
+class NoCompactionOptions : public CompactionOptions
+{
+private:
+    /* data */
+public:
+    NoCompactionOptions(/* args */)=default;
+    virtual ~NoCompactionOptions()=default;
+};
+
+
+
+
 
 
 

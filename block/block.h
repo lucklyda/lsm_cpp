@@ -18,17 +18,17 @@ public:
 
     Block() : data_(nullptr), len_(0), offset_(nullptr), nums(0), own_data(false) {}
 
-    char *encode(){
-        uint32_t tot_len = len_+sizeof(uint16_t)*nums+sizeof(uint16_t);
-        char *res = new char[tot_len];
-        uint32_t offset = 0;
-        memcpy(res+offset,data_,len_);
-        offset+=len_;
-        memcpy(res + offset, offset_, nums * sizeof(uint16_t));
-        offset += nums * sizeof(uint16_t);
-        memcpy(res + offset, &nums, sizeof(uint16_t));
-        return res;
-    }
+    // char *encode(){
+    //     uint32_t tot_len = len_+sizeof(uint16_t)*nums+sizeof(uint16_t);
+    //     char *res = new char[tot_len];
+    //     uint32_t offset = 0;
+    //     memcpy(res+offset,data_,len_);
+    //     offset+=len_;
+    //     memcpy(res + offset, offset_, nums * sizeof(uint16_t));
+    //     offset += nums * sizeof(uint16_t);
+    //     memcpy(res + offset, &nums, sizeof(uint16_t));
+    //     return res;
+    // }
 
     static char *encode(char *data_,uint32_t len_,uint16_t* offset_,uint16_t nums,uint64_t &len){
         uint32_t tot_len = len_+sizeof(uint16_t)*nums+sizeof(uint16_t);
@@ -168,6 +168,11 @@ public:
         idx = 0;
         value_range.first=0;
         value_range.second=0;
+
+        if(block_->nums!=0){
+            auto first_offset = block_->offset_[0];
+            parse_kv(first_offset,true);
+        }
     }
 
     static BlockIter* create_and_seek_to_first(std::unique_ptr<Block> block){
@@ -204,7 +209,7 @@ public:
         }
     }
 
-    void seek_to_key(const LsmKey& key_){
+    void seek_to_key(const LsmKey& key){
         auto offsets = block_->offset_;
         uint64_t left = 0;
         uint64_t right = block_->nums;
@@ -218,8 +223,7 @@ public:
                 right=mid;
                 continue;
             }
-            const LsmKey& inner_key = mid==0?first_key:key_;
-            if(inner_key<key_){
+            if(key_<key){
                 left=mid+1;
             }else{
                 right=mid;
@@ -231,7 +235,7 @@ public:
 
     bool is_valid()
     {
-        return idx<block_->nums && first_key.user_key.length()>0;
+        return idx<block_->nums && key_.user_key.length()>0;
     }
 
 };
