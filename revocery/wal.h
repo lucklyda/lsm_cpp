@@ -115,7 +115,7 @@ public:
             uint16_t value_len=0;
             value_len=pair.second.size();
             buf.append((char*)&value_len,sizeof(uint16_t));
-            if(value_len>0)buf.append(pair.second.to_data(),value_len);
+            buf.append(pair.second.to_data(),value_len);
         }
         uint32_t len = buf.size();
         file->write((char*)&len,sizeof(uint32_t));

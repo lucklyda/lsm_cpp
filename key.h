@@ -9,6 +9,7 @@ using usize = uint64_t;
 #define TS_BEGIN UINT64_MAX
 #define TS_END 0
 
+//TOOD 替换所有string,使用内存池管理数据,保证安全的生命周期
 struct LsmKey {
     std::string user_key;
     uint64_t ts;

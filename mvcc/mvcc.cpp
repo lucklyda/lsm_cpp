@@ -106,7 +106,7 @@ bool Transaction::commit()
         commit_data.read_ts = read_ts_;
         commit_data.commit_ts = ts;
         commit_data.key_hashes=write_set;
-        mvcc->committed_txns.insert({ts,commit_data});
+        mvcc->committed_txns[ts]=commit_data;
         auto iter = mvcc->committed_txns.begin();
         while (iter!=mvcc->committed_txns.end())
         {
