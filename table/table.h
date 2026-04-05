@@ -522,7 +522,7 @@ public:
     void check_upper()
     {
         if(upper_bound.user_key.length()>0){
-            is_bigt_upper = blk_iter && blk_iter->is_valid() && !(upper_bound<blk_iter->key());
+            is_bigt_upper = blk_iter && blk_iter->is_valid() && !(blk_iter->key() < upper_bound);//blk>=upper
         }else{
             is_bigt_upper=false;
         }

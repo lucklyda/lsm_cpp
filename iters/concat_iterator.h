@@ -18,9 +18,9 @@ public:
                 throw std::logic_error("sstable invalid");
             }
         }
-        for (size_t i = 0; i < sstables.empty() ? 0 : sstables.size() - 1; ++i) {
-            if(sstables[i]->last_key_()>sstables[i+1]->first_key_()){
-                throw std::logic_error("sstable invalid");
+        for (size_t i = 0; i + 1 < sstables.size(); ++i) {
+            if (sstables[i]->last_key_() > sstables[i+1]->first_key_()) {
+                throw std::logic_error("sstable invalid: overlapping key range");
             }
         }
     }

@@ -85,7 +85,8 @@ public:
         return marks.watermark().value_or(ts);
     }
     std::unique_ptr<Transaction> new_txn(LsmStorageInner* inner,bool serializable){
-        std::shared_lock<std::shared_mutex> lock(mutex_);
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        marks.add_reader(ts);
         return std::make_unique<Transaction>(ts,inner,serializable);
     }
     ~LsmMvccInner()=default;

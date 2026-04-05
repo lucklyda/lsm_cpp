@@ -840,7 +840,7 @@ compact_generate_sst_from_iter(std::unique_ptr<Iterators> iter)
 {
     std::unique_ptr<TableBuilder> builder=nullptr;
     std::vector<std::shared_ptr<Sstable>> new_sst;
-    std::string_view last_key;
+    std::string last_key;
 
     auto water_mark = mvcc_->watermark();
     bool first_key_below_watermark = false;
@@ -864,6 +864,7 @@ compact_generate_sst_from_iter(std::unique_ptr<Iterators> iter)
 
         if(iter->key().ts<=water_mark){
             if(!first_key_below_watermark){
+                auto key_ = iter->key();
                 iter->next();
                 continue;
             }
@@ -879,7 +880,7 @@ compact_generate_sst_from_iter(std::unique_ptr<Iterators> iter)
             if(skip)continue;
         }
 
-        if(builder->estimated_size()>=options.target_sst_size){
+        if(builder->estimated_size()>=options.target_sst_size && !same_as_last_key){
             auto sst_id = next_sst_id();
             auto sst_table = builder->build(sst_id,path_of_sst(sst_id).c_str()).release();
             new_sst.push_back(std::shared_ptr<Sstable>(sst_table));

@@ -75,12 +75,20 @@ bool Transaction::commit()
         if(write_set.size()!=0){
             std::shared_lock<std::shared_mutex> guard{mvcc->mutex_};
             //read commit txn data
-            for(uint64_t i=read_ts_+1;i<mvcc->committed_txns.size();++i){
-                for(auto iter=read_set.begin();iter!=read_set.end();++iter){
-                    if(mvcc->committed_txns[i].key_hashes.count(*iter)){
-                        return false; // dead lock need rollback
-                    }
+            auto start_it = mvcc->committed_txns.upper_bound(read_ts_);
+            for(auto iter = start_it; iter != mvcc->committed_txns.end(); ++iter){
+                // for(auto iter=read_set.begin();iter!=read_set.end();++iter){
+                //     if(mvcc->committed_txns[i].key_hashes.count(*iter)){
+                //         return false; // dead lock need rollback
+                //     }
+                // }
+                CommittedTxnData& txn_data = iter->second;
+                for (auto key_hash : read_set) {
+                if (txn_data.key_hashes.count(key_hash)) {
+                    // 冲突
+                    return false;
                 }
+            }
             }
         }
     }

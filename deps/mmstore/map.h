@@ -64,16 +64,16 @@ private:
         if(this->lower_.type==0)return true;
         const Key& key = cit->first;
         const Key& bound_val = this->lower_.key;
-        if(this->lower_.type == 1)return !(key<bound_val);
-        if(this->lower_.type==2)return bound_val<key;
+        if(this->lower_.type == 1)return !(key<bound_val);// key>=bound
+        if(this->lower_.type==2)return bound_val<key;//key > bound
         return true;
     }
     bool check_upper()const{
         if(this->upper_.type==0)return true;
         const Key& key = cit->first;
         const Key& bound_val = this->upper_.key;
-        if(this->upper_.type == 1)return !(bound_val<key);
-        if(this->upper_.type==2)return key<bound_val;
+        if(this->upper_.type == 1)return !(bound_val<key);// key<=bound
+        if(this->upper_.type==2)return key < bound_val;//key<bound
         return true;
     }
 
