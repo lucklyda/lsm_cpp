@@ -1,6 +1,7 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <optional>
 #include <chrono>
 #include <random>
 #include <thread>
@@ -132,9 +133,8 @@ void bench_single_read_random() {
     for (size_t i = 0; i < TEST_KEY_COUNT; ++i) {
         std::string key = "key_" + random_string(16);
         std::string v = random_string(SMALL_VALUE_SIZE);
-        Value vvv(v);
-        keys[key]=v;
-        lsm.put(key, vvv);
+        keys[key] = v;
+        lsm.put(key, v);
     }
     lsm.sync(); // 确保数据落盘
 
@@ -144,9 +144,9 @@ void bench_single_read_random() {
     size_t null_val=0;
     for (const auto& key : keys) {
         auto val = lsm.get(key.first);
-        if(val.is_empty()){
+        if (!val.has_value()) {
             null_val++;
-        }else if(key.second==val.value){
+        } else if (key.second == *val) {
             hit++;
         }
     }
@@ -334,12 +334,11 @@ void bench_scan() {
 
     size_t count = 0;
     while (iter->is_valid()) {
-        auto val = iter->value().value;
-        if(val == extract_num_from_scan_key(iter->key().user_key)){
+        std::string val(iter->value_view());
+        if (val == extract_num_from_scan_key(std::string(iter->key_view().user_key))) {
             count++;
         }
         iter->next();
-        
     }
     auto end = now();
 
@@ -396,7 +395,9 @@ void bench_crash_recovery() {
     // 验证数据完整性
     size_t hit = 0;
     for (size_t i = 0; i < RECOVERY_CNT; ++i) {
-        if (!lsm_recover.get("crash_key_" + std::to_string(i)).is_empty()) hit++;
+        if (lsm_recover.get("crash_key_" + std::to_string(i)).has_value()) {
+            hit++;
+        }
     }
 
     printf("[崩溃恢复测试]\n  恢复耗时: %.2f ms | 恢复数据数: %zu/%zu (完整性)\n\n",
@@ -484,11 +485,10 @@ void bench_txn_mvcc_concurrent() {
             } else {
                 // 读操作：读取 key，并进行快照一致性验证
                 auto val_opt = txn->get(key);
-                if (val_opt.is_empty()) {
-                    // 理论上 key 一定存在，若不存在说明有 bug
+                if (!val_opt.has_value()) {
                     test_failed = true;
                 } else {
-                    std::string val = val_opt.value;
+                    std::string val = *val_opt;
                     // 验证读到的值格式是否符合预期：可以是 "init_<num>" 或 "txn_<tid>_<seq>"
                     // 此处仅做简单检查：不为空且不是损坏格式，更复杂的验证可做版本号校验
                     if (val.empty()) {
@@ -528,12 +528,12 @@ void bench_txn_mvcc_concurrent() {
     bool consistency_ok = true;
     for (int i = 0; i < NUM_KEYS; ++i) {
         std::string key = "key_" + std::to_string(i);
-        auto val_opt = lsm.get(key);  // 使用非事务读（最新快照）
-        if (val_opt.is_empty()) {
+        auto val_opt = lsm.get(key);
+        if (!val_opt.has_value()) {
             consistency_ok = false;
             std::cerr << "Consistency error: key " << key << " missing!" << std::endl;
         } else {
-            std::string val = val_opt.value;
+            std::string val = *val_opt;
             // 简单格式检查：以 "init_" 或 "txn_" 开头
             if (val.find("init_") != 0 && val.find("txn_") != 0) {
                 consistency_ok = false;

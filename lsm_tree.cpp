@@ -1,5 +1,7 @@
 #include "lsm_tree.h"
 #include "table/table.h"
+#include <optional>
+#include <string>
 #include "iters/two_merge_iterators.h"
 #include "iters/merge_iterators.h"
 #include "iters/concat_iterator.h"
@@ -523,7 +525,7 @@ std::unique_ptr<Transaction> LsmStorageInner::new_txn()
     return mvcc_->new_txn(this,options.serializable);
 }
 
-Value LsmStorageInner::get(std::string_view key){
+std::optional<std::string> LsmStorageInner::get(std::string_view key) {
     auto txn = new_txn();
     return txn->get(key);
 }
@@ -533,9 +535,12 @@ bool LsmStorageInner::write_batch(const std::vector<WriteBatchRecord>& batch){
         return write_batch_inner(batch);
     }else{
         auto txn = new_txn();
-        for(auto &r:batch){
-            if(r.type==0)txn->delete_(r.key.user_key);
-            else txn->put(r.key.user_key,r.value);
+        for (auto& r : batch) {
+            if (r.type == 0) {
+                txn->delete_(r.key);
+            } else {
+                txn->put(std::string_view(r.key), std::string_view(r.value));
+            }
         }
         if(!txn->commit()){
             throw std::logic_error("Thread Check Error!!");
@@ -544,37 +549,36 @@ bool LsmStorageInner::write_batch(const std::vector<WriteBatchRecord>& batch){
     return true;
 }
 
-bool LsmStorageInner::put(std::string_view key,Value value){
-    if(!options.serializable){
+bool LsmStorageInner::put(std::string_view key, std::string_view value) {
+    if (!options.serializable) {
         WriteBatchRecord r;
         r.type = 1;
-        r.key = LsmKey(key,0);
-        r.value = value;
+        r.key.assign(key.data(), key.size());
+        r.value.assign(value.data(), value.size());
         return write_batch_inner({r});
-    }else{
-        auto txn = new_txn();
-        txn->put(key,value);
-        if(!txn->commit()){
-            throw std::logic_error("Thread Check Error!!");
-        }
-        return true;
     }
+    auto txn = new_txn();
+    txn->put(key, value);
+    if (!txn->commit()) {
+        throw std::logic_error("Thread Check Error!!");
+    }
+    return true;
 }
 
-bool LsmStorageInner::delete_(std::string_view key){
-    if(!options.serializable){
+bool LsmStorageInner::delete_(std::string_view key) {
+    if (!options.serializable) {
         WriteBatchRecord r;
         r.type = 0;
-        r.key = LsmKey(key,0);
+        r.key.assign(key.data(), key.size());
+        r.value.clear();
         return write_batch_inner({r});
-    }else{
-        auto txn = new_txn();
-        txn->delete_(key);
-        if(!txn->commit()){
-            throw std::logic_error("Thread Check Error!!");
-        }
-        return true;
     }
+    auto txn = new_txn();
+    txn->delete_(key);
+    if (!txn->commit()) {
+        throw std::logic_error("Thread Check Error!!");
+    }
+    return true;
 }
 
 std::unique_ptr<Iterators> LsmStorageInner::
@@ -596,7 +600,7 @@ bool LsmStorageInner::key_within(std::string_view user_key,
     return table_begin.user_key<=user_key && user_key<=table_end.user_key;
 }
 
-Value LsmStorageInner::get_with_ts(std::string_view key,uint64_t ts)
+std::optional<std::string> LsmStorageInner::get_with_ts(std::string_view key, uint64_t ts)
 {
     auto snapshot = get_snapshot();
     std::vector<std::unique_ptr<Iterators>> mem_iters;
@@ -664,10 +668,11 @@ Value LsmStorageInner::get_with_ts(std::string_view key,uint64_t ts)
         upper_,
         ts
     );
-    if(iter->is_valid() && iter->key().user_key==key && !iter->value().is_empty()){
-        return iter->value();
+    if (iter->is_valid() && iter->key_view().user_key == key && !iter->value_view().empty()) {
+        auto vv = iter->value_view();
+        return std::string(vv.data(), vv.size());
     }
-    return Value();
+    return std::nullopt;
 }
 
 uint64_t LsmStorageInner::write_batch_inner(const std::vector<WriteBatchRecord>& batch)
@@ -675,11 +680,11 @@ uint64_t LsmStorageInner::write_batch_inner(const std::vector<WriteBatchRecord>&
     std::unique_lock write_lock(write_mutex_); 
     auto new_state = std::make_unique<LsmStorageState>(*get_snapshot());
     uint64_t read_ts = mvcc_->latest_commit_ts()+1;
-    for(auto &r:batch){
-        if(r.type==0){
-            new_state->memtable->put(LsmKey(r.key.user_key,read_ts),Value());
-        }else{
-            new_state->memtable->put(LsmKey(r.key.user_key,read_ts),r.value);
+    for (auto& r : batch) {
+        if (r.type == 0) {
+            new_state->memtable->put(std::string_view(r.key), read_ts, std::string_view());
+        } else {
+            new_state->memtable->put(std::string_view(r.key), read_ts, std::string_view(r.value));
         }
     }
     update_state(std::move(new_state));
@@ -778,8 +783,8 @@ std::unique_ptr<Iterators> LsmStorageInner::scan_with_ts(const Bound<std::string
         auto imm_iter = sst->scan(bound_key.first,bound_key.second);
         if(imm_iter->is_valid()){
             mem_iters.push_back(std::unique_ptr<Iterators>(imm_iter));
-        }else{
-            delete mem_iter;
+        } else {
+            delete imm_iter;
         }
     }
 
@@ -850,46 +855,51 @@ compact_generate_sst_from_iter(std::unique_ptr<Iterators> iter)
         if(!builder){
             builder = std::make_unique<TableBuilder>(options.block_size);
         }
-        bool same_as_last_key = iter->key().user_key==last_key;
-        if (!same_as_last_key){
+        auto kv = iter->key_view();
+        bool same_as_last_key = (kv.user_key == last_key);
+        if (!same_as_last_key) {
             first_key_below_watermark = true;
         }
 
-        if(!same_as_last_key && iter->key().ts<=water_mark && iter->value().is_empty()){
-            last_key = iter->key().user_key;
+        if (!same_as_last_key && kv.ts <= water_mark && iter->value_view().empty()) {
+            last_key = std::string(kv.user_key);
             iter->next();
             first_key_below_watermark = false;
             continue;
         }
 
-        if(iter->key().ts<=water_mark){
-            if(!first_key_below_watermark){
-                auto key_ = iter->key();
+        if (kv.ts <= water_mark) {
+            if (!first_key_below_watermark) {
                 iter->next();
                 continue;
             }
             first_key_below_watermark = false;
             bool skip = false;
-            for(auto &fliter:compaction_filters){
-                if(starts_with(iter->key().user_key,fliter.prefix)){
+            for (auto& fliter : compaction_filters) {
+                if (starts_with(kv.user_key, fliter.prefix)) {
                     iter->next();
                     skip = true;
                     break;
                 }
             }
-            if(skip)continue;
+            if (skip) {
+                continue;
+            }
         }
 
-        if(builder->estimated_size()>=options.target_sst_size && !same_as_last_key){
+        if (builder->estimated_size() >= options.target_sst_size && !same_as_last_key) {
             auto sst_id = next_sst_id();
-            auto sst_table = builder->build(sst_id,path_of_sst(sst_id).c_str()).release();
+            auto sst_table = builder->build(sst_id, path_of_sst(sst_id).c_str()).release();
             new_sst.push_back(std::shared_ptr<Sstable>(sst_table));
             builder = std::make_unique<TableBuilder>(options.block_size);
         }
 
-        builder->add(iter->key(),iter->value());
-        if(!same_as_last_key){
-            last_key = iter->key().user_key;
+        auto vv = iter->value_view();
+        Key ok(std::string(kv.user_key), kv.ts);
+        Value ov(std::string(vv.data(), vv.size()));
+        builder->add(ok, ov);
+        if (!same_as_last_key) {
+            last_key = std::string(kv.user_key);
         }
         iter->next();
     }

@@ -10,7 +10,7 @@ private:
     Bound<LsmKey> upper_bound_;
     bool is_valid_;
     uint64_t read_ts_;
-    LsmKey pre_key_;
+    std::string pre_user_;
 private:
     bool next_inner(){
         inner_->next();
@@ -18,15 +18,16 @@ private:
             is_valid_ = false;
             return true;
         }
+        auto ik = inner_->key_view();
         switch (upper_bound_.type)
         {
         case 0:{
         } break;
         case 1:{
-            is_valid_ = inner_->key().user_key<=upper_bound_.key.user_key;
+            is_valid_ = ik.user_key <= std::string_view(upper_bound_.key.user_key);
         } break;
         case 2:{
-            is_valid_ = inner_->key().user_key<upper_bound_.key.user_key;
+            is_valid_ = ik.user_key < std::string_view(upper_bound_.key.user_key);
         } break;
         default:
             break;
@@ -36,19 +37,19 @@ private:
     bool move_to_non_delete(){
         while (true)
         {
-            while(is_valid() && inner_->key().user_key==pre_key_.user_key){
+            while(is_valid() && inner_->key_view().user_key==pre_user_){
                 next_inner();
             }
             if(!is_valid())break;
-            pre_key_.user_key = inner_->key().user_key;
-            while (is_valid() && inner_->key().user_key==pre_key_.user_key
-                && inner_->key().ts>read_ts_)
+            pre_user_ = std::string(inner_->key_view().user_key);
+            while (is_valid() && inner_->key_view().user_key==pre_user_
+                && inner_->key_view().ts>read_ts_)
             {
                 next_inner();
             }
             if(!is_valid())break;
-            if(inner_->key().user_key!=pre_key_.user_key)continue;
-            if(!inner_->value().is_empty())break;
+            if(inner_->key_view().user_key!=pre_user_)continue;
+            if(!inner_->value_view().empty())break;
         }
         return true;
     }
@@ -62,16 +63,16 @@ public:
     }
     ~LsmIterator()=default;
 
-    const Key& key()const override{
-        return inner_->key();
+    LsmKeyView key_view() const override{
+        return inner_->key_view();
     }
-    Value value()const override{
-        return inner_->value();
+    std::string_view value_view() const override{
+        return inner_->value_view();
     }
-    bool is_valid(){
+    bool is_valid() override{
         return is_valid_;
     }
-    bool next(){
+    bool next() override{
         next_inner();
         move_to_non_delete();
         return true;
@@ -95,16 +96,16 @@ public:
     }
     ~FusedIterator() = default;
 
-    const Key& key()const{
-        return iter_->key();
+    LsmKeyView key_view() const override {
+        return iter_->key_view();
     }
-    Value value()const{
-        return iter_->value();
+    std::string_view value_view() const override {
+        return iter_->value_view();
     }
-    bool is_valid(){
+    bool is_valid() override {
         return !has_errored && iter_->is_valid();
     }
-    bool next(){
+    bool next() override {
         if(has_errored){
             throw std::logic_error("the iterator is tainted");
         }

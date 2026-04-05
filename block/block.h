@@ -188,13 +188,19 @@ public:
         return res;
     }
 
-    const Key& key(){
-        return key_;
+    const Key& key() const { return key_; }
+
+    LsmKeyView key_view() const {
+        return {std::string_view(key_.user_key), key_.ts};
     }
 
-    Value value(){
-        std::string str(block_->data_+value_range.first,value_range.second);
-        return Value(str);
+    std::string_view value_view() const {
+        return std::string_view(block_->data_ + value_range.first, value_range.second);
+    }
+
+    Value value() {
+        auto v = value_view();
+        return Value(std::string(v.data(), v.size()));
     }
 
     void seek_to_first(){

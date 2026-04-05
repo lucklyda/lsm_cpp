@@ -522,24 +522,25 @@ public:
     void check_upper()
     {
         if(upper_bound.user_key.length()>0){
-            is_bigt_upper = blk_iter && blk_iter->is_valid() && !(blk_iter->key() < upper_bound);//blk>=upper
+            is_bigt_upper = blk_iter && blk_iter->is_valid()
+                && !(blk_iter->key() < upper_bound);
         }else{
             is_bigt_upper=false;
         }
     }
 
-    const Key& key()const override{
-        return blk_iter->key();
+    LsmKeyView key_view() const override {
+        return blk_iter->key_view();
     }
-    Value value()const override{
-        return blk_iter->value();
+    std::string_view value_view() const override {
+        return blk_iter->value_view();
     }
 
-    bool is_valid() override{
+    bool is_valid() override {
         return blk_iter->is_valid() && !is_bigt_upper;
     }
 
-    bool next()override{
+    bool next() override {
         blk_iter->next();
         if(!blk_iter->is_valid() && blk_idx<table->num_of_blocks()-1){
             blk_idx+=1;

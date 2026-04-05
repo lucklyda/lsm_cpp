@@ -83,17 +83,17 @@ public:
         return iter;
     }
 
-    const Key& key()const override{
-        return current_->key();
+    LsmKeyView key_view() const override{
+        return current_->key_view();
     }
-    Value value()const override{
-        return current_->value();
+    std::string_view value_view() const override{
+        return current_->value_view();
     }
-    bool is_valid(){
+    bool is_valid() override {
         if(current_)return current_->is_valid();
         return false;
     }
-    bool next(){
+    bool next() override {
         current_->next();
         move_until_valid();
         return true;

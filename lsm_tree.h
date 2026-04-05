@@ -8,13 +8,14 @@
 #include <thread>
 #include <chrono>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <condition_variable>
 
-struct WriteBatchRecord
-{
-    uint8_t type; //0 is delete;1 is insert
-    LsmKey key;
-    Value value;
+struct WriteBatchRecord {
+    uint8_t type;
+    std::string key;
+    std::string value;
 };
 
 
@@ -85,11 +86,15 @@ public:
         compaction_filters.push_back(compaction_filter);
     }
 
-    Value get(std::string_view key);
+    std::optional<std::string> get(std::string_view key);
 
     bool write_batch(const std::vector<WriteBatchRecord>& batch);
 
-    bool put(std::string_view key,Value value);
+    bool put(std::string_view key, std::string_view value);
+    bool put(std::string_view key, const std::string& value) { return put(key, std::string_view(value)); }
+    bool put(std::string_view key, const char* value) {
+        return put(key, value ? std::string_view(value) : std::string_view{});
+    }
 
     bool delete_(std::string_view key);
 
@@ -196,7 +201,7 @@ private:
         state = std::move(new_state);
     }
 
-    Value get_with_ts(std::string_view key,uint64_t ts);
+    std::optional<std::string> get_with_ts(std::string_view key, uint64_t ts);
     uint64_t write_batch_inner(const std::vector<WriteBatchRecord>& batch);
     bool freeze_memtable_with_memtable(std::unique_ptr<MemTable>);
     bool force_freeze_memtable();
@@ -239,12 +244,10 @@ public:
     void add_compaction_filter(CompactionFilter filter){
         inner->add_compaction_filter(filter);
     }
-    Value get(std::string_view key){
-        return inner->get(key);
-    }
-    bool put(std::string_view key,Value val){
-        return inner->put(key,val);
-    }
+    std::optional<std::string> get(std::string_view key) { return inner->get(key); }
+    bool put(std::string_view key, std::string_view val) { return inner->put(key, val); }
+    bool put(std::string_view key, const std::string& val) { return inner->put(key, val); }
+    bool put(std::string_view key, const char* val) { return inner->put(key, val); }
 
     bool delete_(std::string_view key){
         return inner->delete_(key);

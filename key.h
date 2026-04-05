@@ -73,6 +73,174 @@ struct LsmValue
     LsmValue(const char*s):value(s){}
 };
 
+
+class StringRef {
+    public:
+        StringRef() : data_(nullptr), len_(0) {}
+        StringRef(const char* data, size_t len) : data_(data), len_(len) {}
+        StringRef(const char* str) : data_(str), len_(str ? std::strlen(str) : 0) {}
+        StringRef(const std::string& s) : data_(s.data()), len_(s.size()) {}
+        StringRef(std::string_view sv) : data_(sv.data()), len_(sv.size()) {}
+    
+        const char* data() const { return data_; }
+        size_t size() const { return len_; }
+        size_t length() const { return len_;}
+        bool empty() const { return len_ == 0; }
+        void clear() { len_=0; data_ = nullptr;}
+    
+        const char& operator[](size_t idx) const {
+            // 假设 idx 一定在 [0, len_) 范围内，调用者需保证
+            return data_[idx];
+        }
+    
+        // 比较函数，直接内存比较
+        int compare(const StringRef& other) const {
+            int cmp = std::memcmp(data_, other.data_, std::min(len_, other.len_));
+            if (cmp != 0) return cmp;
+            if (len_ < other.len_) return -1;
+            if (len_ > other.len_) return 1;
+            return 0;
+        }
+    
+        int compare(std::string_view sv) const {
+            int cmp = std::memcmp(data_, sv.data(), std::min(len_, sv.size()));
+            if (cmp != 0) return cmp;
+            if (len_ < sv.size()) return -1;
+            if (len_ > sv.size()) return 1;
+            return 0;
+        }
+    
+        // 与 const char* 比较（可选）
+        int compare(const char* str) const {
+            return compare(std::string_view(str));
+        }
+    
+        bool operator==(const StringRef& other) const { return compare(other) == 0; }
+        bool operator!=(const StringRef& other) const { return !(*this == other); }
+        bool operator<(const StringRef& other) const { return compare(other) < 0; }
+        bool operator<=(const StringRef& other) const { return compare(other) <= 0; }
+        bool operator>(const StringRef& other) const { return compare(other) > 0; }
+        bool operator>=(const StringRef& other) const { return compare(other) >= 0; }
+    
+        // 与 std::string_view 的比较（成员函数）
+        bool operator==(std::string_view sv) const { return compare(sv) == 0; }
+        bool operator!=(std::string_view sv) const { return !(*this == sv); }
+        bool operator<(std::string_view sv) const { return compare(sv) < 0; }
+        bool operator<=(std::string_view sv) const { return compare(sv) <= 0; }
+        bool operator>(std::string_view sv) const { return compare(sv) > 0; }
+        bool operator>=(std::string_view sv) const { return compare(sv) >= 0; }
+    
+        // 转换为 std::string_view（零拷贝）
+        operator std::string_view() const { return {data_, len_}; }
+    
+    private:
+        const char* data_;
+        size_t len_;
+    };
+    
+    inline bool operator==(std::string_view lhs, const StringRef& rhs) {
+        return rhs == lhs;   // 复用成员
+    }
+    inline bool operator!=(std::string_view lhs, const StringRef& rhs) {
+        return !(lhs == rhs);
+    }
+    inline bool operator<(std::string_view lhs, const StringRef& rhs) {
+        return rhs > lhs;    // 或者直接用 rhs.compare(lhs) > 0
+    }
+    inline bool operator<=(std::string_view lhs, const StringRef& rhs) {
+        return rhs >= lhs;
+    }
+    inline bool operator>(std::string_view lhs, const StringRef& rhs) {
+        return rhs < lhs;
+    }
+    inline bool operator>=(std::string_view lhs, const StringRef& rhs) {
+        return rhs <= lhs;
+    }
+
+// 迭代器 / 比较用：零拷贝视图（底层缓冲区生命周期由具体迭代器保证）
+struct LsmKeyView {
+    std::string_view user_key;
+    uint64_t ts = 0;
+};
+
+inline int cmp_lsm_key_view(LsmKeyView a, LsmKeyView b) noexcept {
+    int c = a.user_key.compare(b.user_key);
+    if (c != 0) {
+        return c < 0 ? -1 : 1;
+    }
+    if (a.ts > b.ts) {
+        return -1;
+    }
+    if (a.ts < b.ts) {
+        return 1;
+    }
+    return 0;
+}
+
+inline bool lsm_key_view_eq(LsmKeyView a, LsmKeyView b) noexcept {
+    return cmp_lsm_key_view(a, b) == 0;
+}
+
+inline bool lsm_key_view_lt(LsmKeyView a, LsmKeyView b) noexcept {
+    return cmp_lsm_key_view(a, b) < 0;
+}
+
+struct MemLsmKey {
+    StringRef user_key;
+    uint64_t ts;
+
+    bool operator<(const MemLsmKey& other) const {
+        int cmp = user_key.compare(other.user_key);
+        if (cmp != 0) return cmp < 0;
+        return ts > other.ts;
+    }
+
+    bool operator<=(const MemLsmKey& other) const {
+        return !(*this > other);
+    }
+
+    int cmp(const MemLsmKey& other) const {
+        int c = user_key.compare(other.user_key);
+        if (c != 0) return c;
+        if (ts > other.ts) return -1;
+        if (ts < other.ts) return 1;
+        return 0;
+    }
+
+    bool operator>(const MemLsmKey& other) const { return other < *this; }
+    bool operator==(const MemLsmKey& other) const {
+        return user_key == other.user_key && ts == other.ts;
+    }
+
+    MemLsmKey() : user_key(), ts(0) {}
+    MemLsmKey(StringRef key, uint64_t ts_) : user_key(key), ts(ts_) {}
+    MemLsmKey(const MemLsmKey&) = default;
+    MemLsmKey& operator=(const MemLsmKey&) = default;
+
+    LsmKeyView view() const {
+        return {std::string_view(user_key.data(), user_key.size()), ts};
+    }
+};
+
+struct MemLsmValue {
+    StringRef value;
+
+    bool is_empty() const { return value.empty(); }
+    size_t size() const { return value.size(); }
+    const char* to_data() const { return value.data(); }
+
+    MemLsmValue() : value() {}
+    explicit MemLsmValue(StringRef v) : value(v) {}
+    MemLsmValue(const char* data) : value(data) {}
+    MemLsmValue(const std::string& s) : value(s) {}
+    MemLsmValue(const MemLsmValue&) = default;
+    MemLsmValue& operator=(const MemLsmValue&) = default;
+
+    std::string_view view() const {
+        return std::string_view(value.data(), value.size());
+    }
+};
+
 // 方便打印
 // static  std::ostream& operator<<(std::ostream& os, const LsmKey& k) {
 //     os << "[key=" << k.user_key << ", ts=" << k.ts << "]";

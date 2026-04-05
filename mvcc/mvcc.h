@@ -4,6 +4,9 @@
 #include <memory>
 #include <mutex>
 #include <atomic>
+#include <optional>
+#include <string>
+#include <string_view>
 
 #include "../iterators.h"
 #include "watermark.h"
@@ -19,7 +22,7 @@ private:
     std::shared_mutex lock;
     uint64_t read_ts_;
     LsmStorageInner *inner_;
-    std::unique_ptr<mmstore<std::string_view,Value>> local_storage;
+    std::unique_ptr<Map<std::string, std::string>> local_storage;
     std::atomic<bool> committed{false};
     std::unordered_set<uint32_t> write_set;
     std::unordered_set<uint32_t> read_set;
@@ -29,14 +32,15 @@ public:
         read_ts_ = read_ts;
         inner_ = inner;
         serializable_ = serializable;
-        local_storage = std::make_unique<Map<std::string_view,Value>>();
+        local_storage = std::make_unique<Map<std::string, std::string>>();
     }
-    Value get(std::string_view);
+    std::optional<std::string> get(std::string_view key);
 
     std::unique_ptr<Iterators> scan(const Bound<std::string_view>&lower,const Bound<std::string_view>&upper);
 
     std::unique_ptr<Iterators> scan_out(const Bound<std::string_view>&lower,const Bound<std::string_view>&upper);
-    void put(std::string_view,Value);
+    void put(std::string_view key, std::string_view value);
+    void put(std::string_view key, const std::string& value) { put(key, std::string_view(value)); }
     void delete_(std::string_view);
 
     /**
@@ -93,19 +97,28 @@ public:
 };
 
 
-class TxnLocalIterator:public Iterators
-{
+class TxnLocalIterator : public Iterators {
 private:
-    mmstore<std::string_view,Value> *map_;
-    mmstore_iterator<std::string_view,Value> *iter;
+    Map<std::string, std::string>* map_;
+    mmstore_iterator<std::string, std::string>* iter;
 private:
 public:
-    TxnLocalIterator(mmstore<std::string_view,Value> *map,const Bound<std::string_view>& lower,const Bound<std::string_view>& upper)
-    {
+    TxnLocalIterator(Map<std::string, std::string>* map, const Bound<std::string_view>& lower,
+                     const Bound<std::string_view>& upper) {
         map_ = map;
-        iter = map_->create_iterator(lower,upper);
+        Bound<std::string> lo;
+        Bound<std::string> hi;
+        lo.type = lower.type;
+        hi.type = upper.type;
+        if (lower.type != 0) {
+            lo.key = std::string(lower.key);
+        }
+        if (upper.type != 0) {
+            hi.key = std::string(upper.key);
+        }
+        iter = map_->create_iterator(lo, hi);
     }
-    TxnLocalIterator(mmstore<std::string_view,Value> *map){
+    TxnLocalIterator(Map<std::string, std::string>* map) {
         map_ = map;
         iter = map_->create_iterator();
     }
@@ -113,24 +126,19 @@ public:
         delete iter;
     }
 
-    const Key& key()const override{
-        if(iter->is_valid()){
-            static Key return_key{};
-            return_key.user_key = iter->get_key();
-            return return_key;
-
-        }else{
-            static const Key empty_key{};
-            return empty_key;
+    LsmKeyView key_view() const override {
+        if (iter->is_valid()) {
+            const std::string& k = iter->get_key();
+            return {std::string_view(k), 0};
         }
+        return {};
     }
 
-    Value value()const override{
-        if(iter->is_valid()){
-            return iter->get_value();
-        }else{
-            return nullptr;
+    std::string_view value_view() const override {
+        if (iter->is_valid()) {
+            return std::string_view(iter->get_value());
         }
+        return {};
     }
 
     bool is_valid()override{
@@ -154,14 +162,13 @@ private:
     std::unique_ptr<Iterators> iter;
     bool own_txn_;
 private:
-    void skip_deletes(){
-        while (iter->is_valid() && iter->value().is_empty())
-        {
+    void skip_deletes() {
+        while (iter->is_valid() && iter->value_view().empty()) {
             iter->next();
         }
     }
 
-    void add_to_read_set(const LsmKey&key);
+    void add_to_read_set(LsmKeyView kv);
 
 public:
     TxnIterator(Transaction* txn_,std::unique_ptr<Iterators> iter_,bool own_txn=false){
@@ -169,27 +176,26 @@ public:
         own_txn_=own_txn;
         iter = std::move(iter_);
         skip_deletes();
-        if(is_valid())add_to_read_set(key());
+        if (is_valid()) {
+            add_to_read_set(key_view());
+        }
     }
     ~TxnIterator(){
         if(own_txn_)delete txn;
     }
 
-    const Key& key()const override{
-        if(iter->is_valid()){
-            return iter->key();
-        }else{
-            static const Key empty_key{};
-            return empty_key;
+    LsmKeyView key_view() const override {
+        if (iter->is_valid()) {
+            return iter->key_view();
         }
+        return {};
     }
 
-    Value value()const override{
-        if(iter->is_valid()){
-            return iter->value();
-        }else{
-            return nullptr;
+    std::string_view value_view() const override {
+        if (iter->is_valid()) {
+            return iter->value_view();
         }
+        return {};
     }
 
     bool is_valid()override{
@@ -199,7 +205,9 @@ public:
     bool next() override{
         iter->next();
         skip_deletes();
-        if(is_valid())add_to_read_set(key());
+        if (is_valid()) {
+            add_to_read_set(key_view());
+        }
         return true;
     }
 

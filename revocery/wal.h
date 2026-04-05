@@ -1,6 +1,8 @@
 #pragma once
 
 #include <mutex>
+#include <functional>
+#include <vector>
 #include "../deps/mmstore/skipmap.h"
 #include "../deps/mmstore/map.h"
 #include "../deps/disk/write_buffer.h"
@@ -38,61 +40,63 @@ public:
         }
     }
 
-    static Wal*recover(const char *path,mmstore<Key,Value>& skiplist){
-        FileObject *file_ = FileObject::check_file(path)?FileObject::open_inner(path):nullptr;
-        if(file_==nullptr){
+    using WalRecoverBatchFn = std::function<void(std::vector<std::pair<Key, Value>>)>;
+
+    static Wal* recover(const char* path, WalRecoverBatchFn apply_batch) {
+        FileObject* file_ = FileObject::check_file(path) ? FileObject::open_inner(path) : nullptr;
+        if (file_ == nullptr) {
             return nullptr;
         }
-        uint64_t size=file_->size;
-        char *data = new char[size];
-        if(file_->read(data,size,0)==-1){
-            delete []data;
+        uint64_t size = file_->size;
+        char* data = new char[size];
+        if (file_->read(data, size, 0) == -1) {
+            delete[] data;
+            delete file_;
             return nullptr;
         }
         uint64_t offset = 0;
-        while (offset<size)
-        {
-            uint32_t batch_len = *(uint32_t*)(data+offset);
-            offset+=sizeof(uint32_t);
-            if(offset+batch_len>size){
-                delete []data;
+        while (offset < size) {
+            uint32_t batch_len = *(uint32_t*)(data + offset);
+            offset += sizeof(uint32_t);
+            if (offset + batch_len > size) {
+                delete[] data;
                 delete file_;
                 return nullptr;
             }
-            std::vector<std::pair<Key,const char*>> kv_pair;
-            uint64_t inner_offset=0;
-            uint32_t single_checksum=crc32c_hw(data+offset,batch_len);
-            while (inner_offset<batch_len)
-            {
-                uint16_t key_len = *(uint16_t*)(data+offset+inner_offset);
-                inner_offset+=sizeof(uint16_t);
-                std::string key(data+offset+inner_offset,key_len);
-                inner_offset+=key_len;
-                uint64_t ts = *(uint64_t*)(data+offset+inner_offset);
-                inner_offset+=sizeof(uint64_t);
-                uint16_t value_len = *(uint16_t*)(data+offset+inner_offset);
-                inner_offset+=sizeof(uint16_t);
-                if(value_len>0){
-                    std::string value(data+offset+inner_offset,value_len);
-                    inner_offset+=value_len;
-                    kv_pair.push_back({Key(key,ts),value.c_str()});
-                }else{
-                    kv_pair.push_back({Key(key,ts),nullptr});
+            std::vector<std::pair<Key, Value>> kv_pair;
+            uint64_t inner_offset = 0;
+            uint32_t single_checksum = crc32c_hw(data + offset, batch_len);
+            while (inner_offset < batch_len) {
+                uint16_t key_len = *(uint16_t*)(data + offset + inner_offset);
+                inner_offset += sizeof(uint16_t);
+                std::string key_str(data + offset + inner_offset, key_len);
+                inner_offset += key_len;
+                uint64_t ts = *(uint64_t*)(data + offset + inner_offset);
+                inner_offset += sizeof(uint64_t);
+                uint16_t value_len = *(uint16_t*)(data + offset + inner_offset);
+                inner_offset += sizeof(uint16_t);
+                if (value_len > 0) {
+                    std::string value(data + offset + inner_offset, value_len);
+                    inner_offset += value_len;
+                    kv_pair.push_back({Key(std::move(key_str), ts), Value(std::move(value))});
+                } else {
+                    kv_pair.push_back({Key(std::move(key_str), ts), Value()});
                 }
             }
-            offset+=inner_offset;
-            uint32_t checksum = *(uint32_t*)(data+offset);
-            offset+=sizeof(uint32_t);
-            if(single_checksum!=checksum){
-                delete []data;
+            offset += inner_offset;
+            uint32_t checksum = *(uint32_t*)(data + offset);
+            offset += sizeof(uint32_t);
+            if (single_checksum != checksum) {
+                delete[] data;
                 delete file_;
                 return nullptr;
             }
-            for(auto &kv:kv_pair){
-                skiplist.put(kv.first,Value(kv.second));
+            if (apply_batch) {
+                apply_batch(std::move(kv_pair));
             }
         }
 
+        delete[] data;
         return new Wal(file_);
     }
 

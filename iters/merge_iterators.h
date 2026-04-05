@@ -11,11 +11,11 @@ struct HeapWrapper {
         : index(idx), iter(std::move(it)) {}
 
     bool operator>(const HeapWrapper& other) const {
-        int cmp = iter->key().cmp(other.iter->key());
+        int cmp = cmp_lsm_key_view(iter->key_view(), other.iter->key_view());
         if (cmp != 0) {
-            return cmp > 0; 
+            return cmp > 0;
         }
-        return index > other.index; 
+        return index > other.index;
     }
 };
 
@@ -64,20 +64,20 @@ public:
         return current != nullptr && current->iter->is_valid();
     }
 
-    const Key& key()const override {
-        return current->iter->key();
+    LsmKeyView key_view() const override {
+        return current->iter->key_view();
     }
 
-    Value value() const override{
-        return current->iter->value();
+    std::string_view value_view() const override {
+        return current->iter->value_view();
     }
 
     bool next() override{
-        const LsmKey& current_key = current->iter->key();
+        const LsmKeyView current_key = current->iter->key_view();
         while (!heap.empty()) {
             auto candidate = std::move(const_cast<std::unique_ptr<HeapWrapper>&>(heap.top()));
             heap.pop();
-            if(candidate->iter->key()==current_key){
+            if (lsm_key_view_eq(candidate->iter->key_view(), current_key)) {
                 candidate->iter->next();
                 if (candidate->iter->is_valid()) {
                     heap.push(std::move(candidate));

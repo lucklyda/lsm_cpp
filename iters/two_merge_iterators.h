@@ -10,28 +10,27 @@ public:
     }
 
     void skip_b_if_equal() {
-        while (a_->is_valid() && b_->is_valid() && 
-               a_->key()==b_->key()) 
-        {
+        while (a_->is_valid() && b_->is_valid() &&
+               lsm_key_view_eq(a_->key_view(), b_->key_view())) {
             b_->next();
         }
     }
     bool choose_a() const {
         if (!a_->is_valid()) return false;
         if (!b_->is_valid()) return true;
-        return a_->key()<b_->key();
+        return lsm_key_view_lt(a_->key_view(), b_->key_view());
     }
 
     bool is_valid() override {
         return a_->is_valid() || b_->is_valid();
     }
 
-    const Key& key() const override {
-        return choose_a() ? a_->key() : b_->key();
+    LsmKeyView key_view() const override {
+        return choose_a() ? a_->key_view() : b_->key_view();
     }
 
-    Value value() const override {
-        return choose_a() ? a_->value() : b_->value();
+    std::string_view value_view() const override {
+        return choose_a() ? a_->value_view() : b_->value_view();
     }
 
     bool next() override {
