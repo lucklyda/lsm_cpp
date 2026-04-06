@@ -4,6 +4,7 @@
 #include <iostream>
 #include <string.h>
 #include <nmmintrin.h>
+#include <cstring>
 #include <vector>
 using usize = uint64_t;
 #define TS_BEGIN UINT64_MAX
@@ -95,7 +96,7 @@ class StringRef {
     
         // 比较函数，直接内存比较
         int compare(const StringRef& other) const {
-            int cmp = std::memcmp(data_, other.data_, std::min(len_, other.len_));
+            int cmp = memcmp(data_, other.data_, std::min(len_, other.len_));
             if (cmp != 0) return cmp;
             if (len_ < other.len_) return -1;
             if (len_ > other.len_) return 1;
@@ -103,7 +104,7 @@ class StringRef {
         }
     
         int compare(std::string_view sv) const {
-            int cmp = std::memcmp(data_, sv.data(), std::min(len_, sv.size()));
+            int cmp = memcmp(data_, sv.data(), std::min(len_, sv.size()));
             if (cmp != 0) return cmp;
             if (len_ < sv.size()) return -1;
             if (len_ > sv.size()) return 1;

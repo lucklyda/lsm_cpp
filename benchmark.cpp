@@ -68,6 +68,7 @@ LsmStorageOptions default_options() {
     options.num_memtable_limit = 3;       // 内存表数量限制
     options.enable_wal = true;            // 开启WAL
     options.serializable = true;          // 可串行化事务
+    options.memory_limit = 1024*1024*100; //mem limit
     auto temp = LeveledCompactionOptions();
     auto temp1 = NoCompactionOptions();
     
@@ -562,19 +563,19 @@ int main() {
            TEST_DIR.c_str(), THREAD_COUNT);
 
     // 运行全量测试
-//     bench_single_write_random();
-//     bench_single_write_sequential();
-//    bench_single_read_random();
-//     bench_multi_write();
-//     bench_multi_read_write();
-//     bench_txn_mvcc();
-//     bench_large_kv();
-//      bench_scan();
-//      bench_delete();
-//    bench_crash_recovery();
-//    bench_compaction();
-      bench_txn_mvcc_concurrent();
-    // test_mvcc_signle();
+    bench_single_write_random();
+    bench_single_write_sequential();
+   bench_single_read_random();
+    bench_multi_write();
+    bench_multi_read_write();
+    bench_txn_mvcc();
+    bench_large_kv();
+     bench_scan();
+     bench_delete();
+   bench_crash_recovery();
+   bench_compaction();
+    //  bench_txn_mvcc_concurrent();
+   // test_mvcc_signle();
 
     printf("=======================================================================\n");
     return 0;

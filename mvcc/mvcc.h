@@ -40,7 +40,7 @@ public:
 
     std::unique_ptr<Iterators> scan_out(const Bound<std::string_view>&lower,const Bound<std::string_view>&upper);
     void put(std::string_view key, std::string_view value);
-    void put(std::string_view key, const std::string& value) { put(key, std::string_view(value)); }
+    //void put(std::string_view key, const std::string& value) { put(key, std::string_view(value)); }
     void delete_(std::string_view);
 
     /**

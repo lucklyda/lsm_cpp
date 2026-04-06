@@ -4,17 +4,33 @@
 #include "deps/arena/arena.h"
 #include <shared_mutex>
 #include <atomic>
+#include <string>
 
 class MemTableIterator : public Iterators {
 private:
     mmstore<MemLsmKey, MemLsmValue>* map_;
     mmstore_iterator<MemLsmKey, MemLsmValue>* iter;
+    // Scan bounds must outlive this iterator; MemLsmKey StringRef cannot point at caller's temp LsmKey.
+    std::string bound_lo_user_;
+    std::string bound_hi_user_;
 
 public:
-    MemTableIterator(mmstore<MemLsmKey, MemLsmValue>* map, const Bound<MemLsmKey>& lower,
-                     const Bound<MemLsmKey>& upper) {
+    MemTableIterator(mmstore<MemLsmKey, MemLsmValue>* map, const Bound<Key>& lower,
+                     const Bound<Key>& upper) {
         map_ = map;
-        iter = map_->create_iterator(lower, upper);
+        Bound<MemLsmKey> lo;
+        Bound<MemLsmKey> hi;
+        lo.type = lower.type;
+        hi.type = upper.type;
+        if (lower.type != 0) {
+            bound_lo_user_ = lower.key.user_key;
+            lo.key = MemLsmKey(StringRef(bound_lo_user_.data(), bound_lo_user_.size()), lower.key.ts);
+        }
+        if (upper.type != 0) {
+            bound_hi_user_ = upper.key.user_key;
+            hi.key = MemLsmKey(StringRef(bound_hi_user_.data(), bound_hi_user_.size()), upper.key.ts);
+        }
+        iter = map_->create_iterator(lo, hi);
     }
 
     MemTableIterator(mmstore<MemLsmKey, MemLsmValue>* map) {
@@ -163,19 +179,7 @@ public:
     }
 
     Iterators* scan(const Bound<Key>& lower, const Bound<Key>& upper) {
-        Bound<MemLsmKey> lo;
-        Bound<MemLsmKey> hi;
-        lo.type = lower.type;
-        hi.type = upper.type;
-        if (lower.type != 0) {
-            lo.key = MemLsmKey(StringRef(lower.key.user_key.data(), lower.key.user_key.size()),
-                               lower.key.ts);
-        }
-        if (upper.type != 0) {
-            hi.key = MemLsmKey(StringRef(upper.key.user_key.data(), upper.key.user_key.size()),
-                               upper.key.ts);
-        }
-        return new MemTableIterator(map.get(), lo, hi);
+        return new MemTableIterator(map.get(), lower, upper);
     }
 
     Iterators* scan() { return new MemTableIterator(map.get()); }

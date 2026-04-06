@@ -2,6 +2,7 @@
 #include "mem_table.h"
 #include "mvcc/mvcc.h"
 #include "revocery/manifest.h"
+#include "deps/cache/lru_cache.h"
 
 #include <unordered_map>
 #include <memory>
@@ -27,6 +28,7 @@ struct LsmStorageOptions
    std::shared_ptr<CompactionOptions> compaction_options;
    bool enable_wal;
    bool serializable;
+   usize memory_limit = 1024*1024*1024;
 };
 
 struct LsmStorageState
@@ -55,6 +57,8 @@ private:
     std::shared_mutex state_lock;
     std::mutex write_mutex_; 
     std::string path;
+
+    std::shared_ptr<BlockCache<BlockKey,std::shared_ptr<Block>>> block_cache;
 
     std::atomic<uint64_t> next_sst_id_;
     LsmStorageOptions options;

@@ -6,6 +6,7 @@
 #include <fcntl.h>  
 #include <sys/stat.h>
 #include "../iterators.h"
+#include "../deps/cache/cache.h"
 class BlockMeta
 {
 public:
@@ -209,13 +210,16 @@ private:
     Key last_key;
     std::shared_ptr<Bloom> bloom;
     uint64_t max_ts_;
+    std::shared_ptr<BlockCache<BlockKey,std::shared_ptr<Block>>> block_cache_;
 public:
     Sstable()=default;
     Sstable(std::unique_ptr<FileObject> file_,std::vector<BlockMeta> metas_,
        uint64_t block_meta_offset_, uint64_t id_,Key first_key_,Key last_key_,
-        std::unique_ptr<Bloom> bloom_,uint64_t max_ts):
+        std::unique_ptr<Bloom> bloom_,uint64_t max_ts,
+        std::shared_ptr<BlockCache<BlockKey,std::shared_ptr<Block>>> block_cache=nullptr):
         file(std::move(file_)),metas(metas_),block_meta_offset(block_meta_offset_),
-        id(id_),first_key(first_key_),last_key(last_key_),bloom(std::move(bloom_)),max_ts_(max_ts)
+        id(id_),first_key(first_key_),last_key(last_key_),bloom(std::move(bloom_)),max_ts_(max_ts),
+        block_cache_(block_cache)
     {
     }
 
@@ -229,7 +233,8 @@ public:
     //     }
     // }
 
-    static Sstable* open(uint64_t id,std::unique_ptr<FileObject> file_){
+    static Sstable* open(uint64_t id,std::unique_ptr<FileObject> file_,
+        std::shared_ptr<BlockCache<BlockKey,std::shared_ptr<Block>>> block_cache=nullptr){
         // auto len = file_->size;
         // char *data = new char[sizeof(uint32_t)];
         // if(file_->read(data,sizeof(uint32_t),len-sizeof(uint32_t))==-1){
@@ -322,37 +327,27 @@ public:
         }
         
         return new Sstable(std::move(file_),std::move(metas),
-                meta_offset,id,first_key,last_key,std::move(bloom),max_ts);
+                meta_offset,id,first_key,last_key,std::move(bloom),max_ts,block_cache);
     }
     
 
-    std::unique_ptr<Block> read_block(uint16_t idx){
-        if(idx>=metas.size()){
-            return nullptr;
-        }
-        auto block_offset = metas[idx].offset;
-        uint64_t read_len=0;
-        if(idx<metas.size()-1){
-            read_len = metas[idx+1].offset-block_offset;
+    std::shared_ptr<Block> read_block(uint16_t idx){
+        if(block_cache_!=nullptr){
+            BlockKey key;
+            key.sstable_id = id;
+            key.block_id = idx;
+            auto block = block_cache_->get(key);
+            if(block.has_value()){
+                return block.value();
+            }else{
+                auto read_b = read_block_inner(idx);
+                if(!read_b)return read_b;
+                block_cache_->insert(key,read_b);
+                return read_b;
+            }
         }else{
-            read_len = block_meta_offset-block_offset;
+            return read_block_inner(idx);
         }
-        char *data = new char[read_len];
-        ssize_t read_size = file->read(data,read_len,block_offset);
-        if(read_size==-1){
-            delete []data;
-            return nullptr;
-        }
-        assert(read_size == static_cast<ssize_t>(read_len));
-        uint32_t checksum = *(uint32_t*)(data+read_len-4);
-        auto data_check_sum = crc32c_hw(data,read_len-4);
-        if(checksum!=data_check_sum){
-            delete []data;
-            return nullptr;
-        }
-        auto block = Block::decode(data,read_len-4);
-        delete []data;
-        return std::unique_ptr<Block>(block);
     }
 
     uint16_t find_block_idx(const Key& key){
@@ -394,6 +389,35 @@ public:
     Bloom* get_bloom(){
         return bloom.get();
     }
+private:
+    std::shared_ptr<Block> read_block_inner(uint16_t idx){
+        if(idx>=metas.size()){
+            return nullptr;
+        }
+        auto block_offset = metas[idx].offset;
+        uint64_t read_len=0;
+        if(idx<metas.size()-1){
+            read_len = metas[idx+1].offset-block_offset;
+        }else{
+            read_len = block_meta_offset-block_offset;
+        }
+        char *data = new char[read_len];
+        ssize_t read_size = file->read(data,read_len,block_offset);
+        if(read_size==-1){
+            delete []data;
+            return nullptr;
+        }
+        assert(read_size == static_cast<ssize_t>(read_len));
+        uint32_t checksum = *(uint32_t*)(data+read_len-4);
+        auto data_check_sum = crc32c_hw(data,read_len-4);
+        if(checksum!=data_check_sum){
+            delete []data;
+            return nullptr;
+        }
+        auto block = Block::decode(data,read_len-4);
+        delete []data;
+        return std::shared_ptr<Block>(block);
+    }
 };
 
 
@@ -426,7 +450,7 @@ public:
         if(block==nullptr){
             return false;
         }
-        blk_iter = std::unique_ptr<BlockIter>(BlockIter::create_and_seek_to_first(std::move(block)));
+        blk_iter = std::unique_ptr<BlockIter>(BlockIter::create_and_seek_to_first(block));
         blk_idx=0;
         is_bigt_upper=false;
         check_upper();
@@ -440,7 +464,7 @@ public:
         SsTableIterator *res = new SsTableIterator();
         res->blk_idx=blk_idx;
         res->table = table_;
-        res->blk_iter=std::unique_ptr<BlockIter>(BlockIter::create_and_seek_to_key(std::move(block),key));
+        res->blk_iter=std::unique_ptr<BlockIter>(BlockIter::create_and_seek_to_key(block,key));
         res->is_bigt_upper=false;
         while (!res->blk_iter->is_valid())
         {
@@ -473,7 +497,7 @@ public:
             res->blk_idx=blk_idx;
             res->table = table_;
             res->upper_bound=upper_;
-            res->blk_iter=std::unique_ptr<BlockIter>(BlockIter::create_and_seek_to_key(std::move(block),lower_));
+            res->blk_iter=std::unique_ptr<BlockIter>(BlockIter::create_and_seek_to_key(block,lower_));
             res->is_bigt_upper=false;
             while (!res->blk_iter->is_valid())
             {
@@ -501,7 +525,7 @@ public:
             if(block==nullptr){
                 return false;
             }
-            blk_iter=std::unique_ptr<BlockIter>(BlockIter::create_and_seek_to_key(std::move(block),lower));
+            blk_iter=std::unique_ptr<BlockIter>(BlockIter::create_and_seek_to_key(block,lower));
             while (blk_iter && !blk_iter->is_valid())
             {
                 if(blk_idx<table->num_of_blocks()-1){

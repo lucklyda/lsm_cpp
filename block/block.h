@@ -5,6 +5,26 @@
 
 #include "../key.h"
 #include <assert.h>
+
+struct BlockKey
+{
+    /* data */
+    uint64_t sstable_id;
+    uint64_t block_id;
+    bool operator==(const BlockKey& other) const {
+        return sstable_id == other.sstable_id && block_id == other.block_id;
+    }
+};
+
+namespace std {
+    template <>
+    struct hash<BlockKey> {
+        size_t operator()(const BlockKey& bp) const {
+            return hash<int>()(bp.sstable_id) ^ (hash<int>()(bp.block_id) << 1);
+        }
+    };
+}
+
 class Block
 {
 public:
@@ -74,7 +94,7 @@ public:
 class BlockIter
 {
 private:
-    std::unique_ptr<Block> block_;
+    std::shared_ptr<Block> block_;
     Key key_;
     std::pair<uint64_t,uint64_t> value_range;
     uint16_t idx;
@@ -163,8 +183,8 @@ private:
         value_range=range_;
     }
 public:
-    BlockIter(std::unique_ptr<Block> block){
-        block_ = std::move(block);
+    BlockIter(std::shared_ptr<Block> block){
+        block_ = block;
         idx = 0;
         value_range.first=0;
         value_range.second=0;
@@ -175,15 +195,15 @@ public:
         }
     }
 
-    static BlockIter* create_and_seek_to_first(std::unique_ptr<Block> block){
-        BlockIter *res = new BlockIter(std::move(block));
+    static BlockIter* create_and_seek_to_first(std::shared_ptr<Block> block){
+        BlockIter *res = new BlockIter(block);
         res->seek_to_first();
         return res;
     }
 
-    static BlockIter* create_and_seek_to_key(std::unique_ptr<Block> block,const Key& key)
+    static BlockIter* create_and_seek_to_key(std::shared_ptr<Block> block,const Key& key)
     {
-        BlockIter *res = new BlockIter(std::move(block));
+        BlockIter *res = new BlockIter(block);
         res->seek_to_key(key);
         return res;
     }

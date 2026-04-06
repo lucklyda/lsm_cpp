@@ -166,6 +166,9 @@ LsmStorageInner::LsmStorageInner(std::string path_,LsmStorageOptions options_)
     if(!FileObject::create_dir(path_.c_str())){
         throw std::logic_error("Db Dit Error");
     }
+    //num of block
+    uint32_t NumOfBlockCache=static_cast<uint32_t>(0.8*options_.memory_limit/options_.block_size);
+    block_cache = std::make_shared<LruBlockCache<BlockKey,std::shared_ptr<Block>>>(NumOfBlockCache);
     uint64_t next_sst_id = 1;
     uint64_t begin_ts = 0;
     std::string manifest_path = LsmStorageInner::path_of_manifest_static(path_.c_str());
@@ -218,7 +221,7 @@ LsmStorageInner::LsmStorageInner(std::string path_,LsmStorageOptions options_)
                 auto file =FileObject::open_inner(
                     LsmStorageInner::path_of_sst_static(path_.c_str(),l0_sst).c_str()
                 );
-                auto sstable = Sstable::open(l0_sst,std::unique_ptr<FileObject>(file));
+                auto sstable = Sstable::open(l0_sst,std::unique_ptr<FileObject>(file),block_cache);
                 begin_ts = std::max(begin_ts,sstable->max_ts());
                 out_state->sstables.emplace(l0_sst,sstable);
             }
@@ -271,6 +274,7 @@ LsmStorageInner::LsmStorageInner(std::string path_,LsmStorageOptions options_)
     manifest_ = std::unique_ptr<Manifest>(manifest);
     options = options_;
     mvcc_ = std::make_unique<LsmMvccInner>(begin_ts);
+    
 }
 
 LsmStorageInner::~LsmStorageInner(){
@@ -738,7 +742,7 @@ bool LsmStorageInner::force_flush_next_imm_memtable()
         flush_id = last_mem->id();
     }
 
-    auto sstable = builder->build(flush_id,path_of_sst(flush_id).c_str());
+    auto sstable = builder->build(flush_id,path_of_sst(flush_id).c_str(),block_cache);
     {
         auto new_state = std::make_unique<LsmStorageState>(*get_snapshot());
         new_state->imm_memtables.pop_back();
@@ -889,7 +893,7 @@ compact_generate_sst_from_iter(std::unique_ptr<Iterators> iter)
 
         if (builder->estimated_size() >= options.target_sst_size && !same_as_last_key) {
             auto sst_id = next_sst_id();
-            auto sst_table = builder->build(sst_id, path_of_sst(sst_id).c_str()).release();
+            auto sst_table = builder->build(sst_id, path_of_sst(sst_id).c_str(),block_cache).release();
             new_sst.push_back(std::shared_ptr<Sstable>(sst_table));
             builder = std::make_unique<TableBuilder>(options.block_size);
         }
@@ -906,7 +910,7 @@ compact_generate_sst_from_iter(std::unique_ptr<Iterators> iter)
 
     if(!builder->is_empty()){
         auto sst_id = next_sst_id();
-        auto sst_table = builder->build(sst_id,path_of_sst(sst_id).c_str()).release();
+        auto sst_table = builder->build(sst_id,path_of_sst(sst_id).c_str(),block_cache).release();
         new_sst.push_back(std::shared_ptr<Sstable>(sst_table));    
     }
     return new_sst;

@@ -60,7 +60,8 @@ public:
         return block_builder->is_empty() && data.size()==0;
     }
 
-    std::unique_ptr<Sstable> build(uint64_t id,const char *path)
+    std::unique_ptr<Sstable> build(uint64_t id,const char *path,
+        std::shared_ptr<BlockCache<BlockKey,std::shared_ptr<Block>>> block_cache=nullptr)
     {
         if(!block_builder->is_empty()){
             BlockMeta meta;
@@ -103,7 +104,7 @@ public:
         }
         file->write(buf.data(),buf.size());
         auto sstable = new Sstable(std::unique_ptr<FileObject>(file),
-                    metas,data_len,id,first_key,last_key,std::make_unique<Bloom>(bloom),max_ts);
+                    metas,data_len,id,first_key,last_key,std::make_unique<Bloom>(bloom),max_ts,block_cache);
         return std::unique_ptr<Sstable>(sstable);
     }
 };
